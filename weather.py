@@ -1,0 +1,103 @@
+import urllib.request
+import json
+import datetime
+
+lat = 33.7833
+lon = 130.8833
+
+url = (
+    "https://api.open-meteo.com/v1/forecast"
+    f"?latitude={lat}&longitude={lon}"
+    "&hourly=precipitation,precipitation_probability,weathercode"
+    "&timezone=Asia/Tokyo&forecast_days=1"
+)
+with urllib.request.urlopen(url) as r:
+    data = json.load(r)
+
+today = datetime.date.today()
+today_str = today.strftime("%Y-%m-%d")
+
+hourly_times = data["hourly"]["time"]
+hourly_precip = data["hourly"]["precipitation"]
+hourly_prob = data["hourly"]["precipitation_probability"]
+hourly_codes = data["hourly"]["weathercode"]
+
+target_hours = [8, 10, 12, 14, 16, 18, 20]
+rows = []
+
+for h in target_hours:
+    target_time = f"{today_str}T{h:02d}:00"
+    if target_time in hourly_times:
+        idx = hourly_times.index(target_time)
+        rows.append((h, hourly_prob[idx], hourly_precip[idx], hourly_codes[idx]))
+
+print(f"data: {rows}")
+
+has_rain_over_50 = any(prob >= 50 for _, prob, _, _ in rows)
+if not has_rain_over_50:
+    print("no rain over 50%. skip.")
+    exit()
+
+max_precip = max(precip for _, _, precip, _ in rows)
+is_snow = any(71 <= code <= 77 or code in [85, 86] for _, _, _, code in rows)
+is_typhoon = max_precip >= 30 or any(code in [95, 96, 99] for _, _, _, code in rows)
+
+if is_typhoon:
+    title_label = "台風"
+elif is_snow:
+    title_label = "雪"
+elif max_precip >= 20:
+    title_label = "大雨"
+elif max_precip >= 1:
+    title_label = "雨"
+else:
+    title_label = "小雨"
+
+date_str = today.strftime("%m月%d日")
+title = f"【小倉南区】今日({date_str})は{title_label}の予報"
+
+def prob_emoji(prob, code):
+    is_snow_code = 71 <= code <= 77 or code in [85, 86]
+    if is_snow_code:
+        return "❄️" if prob >= 70 else "🌨️"
+    if prob >= 80: return "☔"
+    if prob >= 60: return "🌧️"
+    if prob >= 40: return "🌦️"
+    if prob >= 20: return "🌤️"
+    return "☀️"
+
+hourly_lines = []
+for h, prob, precip, code in rows:
+    emoji = prob_emoji(prob, code)
+    precip_str = f" {precip:.1f}mm" if precip >= 0.1 else ""
+    hourly_lines.append(f"{h:02d}時 {emoji} {prob}%{precip_str}")
+
+hourly_text = "\n".join(hourly_lines)
+message_parts = ["⏰ 時間別降水確率", hourly_text]
+
+if is_typhoon:
+    message_parts += [
+        "",
+        "🌀 台風情報",
+        "台風の接近が予想されます。外出は控え、安全な場所で過ごしてください。",
+        "最新情報: https://www.jma.go.jp/bosai/typhoon/"
+    ]
+
+message = "\n".join(message_parts)
+priority = "urgent" if is_typhoon else "high"
+tags = "umbrella,rain,tornado" if is_typhoon else "umbrella,rain"
+
+req = urllib.request.Request(
+    "https://ntfy.sh/claude-weather-alert",
+    data=message.encode("utf-8"),
+    headers={
+        "Title": title.encode("utf-8").decode("latin-1", errors="replace"),
+        "Priority": priority,
+        "Tags": tags
+    },
+    method="POST"
+)
+with urllib.request.urlopen(req) as r:
+    print(f"sent: {r.status}")
+    print(f"title: {title}")
+    print(message)
