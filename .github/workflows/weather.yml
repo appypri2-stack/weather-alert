@@ -7,6 +7,6 @@ jobs:
   weather-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - name: check and notify
         run: python3 weather.py
