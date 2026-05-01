@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-import requests
 import os
+import urllib.request
 from datetime import datetime, date, timezone, timedelta
-from urllib.parse import quote
 
 GOOGLE_MAPS_API_KEY = os.environ["GOOGLE_MAPS_API_KEY"]
 GCAL_ICAL_URL = os.environ["GCAL_ICAL_URL"]
@@ -15,16 +14,18 @@ NOTIFY_WHEN_CLEAR = True
 JST = timezone(timedelta(hours=9))
 
 
+def http_get(url, timeout=10):
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8")
+
+
 def is_holiday_today():
     return False  # テスト用: 一時的にスキップ無効化
     try:
-        resp = requests.get(GCAL_ICAL_URL, timeout=10)
-        resp.raise_for_status()
-        ical_text = resp.text
-
+        ical_text = http_get(GCAL_ICAL_URL)
         today = date.today().strftime("%Y%m%d")
         today_dt = datetime.now(JST).strftime("%Y%m%d")
-
         events = ical_text.split("BEGIN:VEVENT")
         for event in events[1:]:
             if today in event or today_dt in event:
@@ -39,8 +40,9 @@ def is_holiday_today():
 
 
 def get_travel_time():
-    url = "https://maps.googleapis.com/maps/api/directions/json"
-    params = {
+    import json
+    from urllib.parse import urlencode
+    params = urlencode({
         "origin": ORIGIN,
         "destination": DESTINATION,
         "mode": "driving",
@@ -49,18 +51,16 @@ def get_travel_time():
         "avoid": "tolls",
         "language": "ja",
         "key": GOOGLE_MAPS_API_KEY
-    }
-    response = requests.get(url, params=params)
-    data = response.json()
+    })
+    url = f"https://maps.googleapis.com/maps/api/directions/json?{params}"
+    data = json.loads(http_get(url))
     if data["status"] != "OK":
         raise Exception(f"APIエラー: {data['status']}")
     leg = data["routes"][0]["legs"][0]
     normal = leg["duration"]["value"]
     traffic = leg.get("duration_in_traffic", {}).get("value", normal)
     return {
-        "normal_seconds": normal,
         "normal_text": leg["duration"]["text"],
-        "traffic_seconds": traffic,
         "traffic_text": leg.get("duration_in_traffic", {}).get("text", leg["duration"]["text"]),
         "delay_seconds": traffic - normal,
         "distance": leg["distance"]["text"]
@@ -69,14 +69,18 @@ def get_travel_time():
 
 def send_ntfy(title, message, priority="high"):
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
-    headers = {
-        "X-Title": quote(title),
-        "X-Priority": priority,
-        "X-Tags": "car,japan",
-        "Content-Type": "text/plain; charset=utf-8",
-    }
-    r = requests.post(url, data=message.encode("utf-8"), headers=headers)
-    return r.status_code == 200
+    body = message.encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_unredirected_header("Title", title.encode("utf-8"))
+    req.add_header("Priority", priority)
+    req.add_header("Tags", "car,japan")
+    req.add_header("Content-Type", "text/plain; charset=utf-8")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as e:
+        print(f"ntfy送信エラー: {e}")
+        return False
 
 
 def main():
