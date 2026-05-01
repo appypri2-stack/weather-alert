@@ -21,7 +21,6 @@ def http_get(url, timeout=10):
 
 
 def is_holiday_today():
-    return False  # テスト用: 一時的にスキップ無効化
     try:
         ical_text = http_get(GCAL_ICAL_URL)
         today = date.today().strftime("%Y%m%d")
