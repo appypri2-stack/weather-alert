@@ -1,14 +1,43 @@
 # -*- coding: utf-8 -*-
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, date, timezone, timedelta
 
 GOOGLE_MAPS_API_KEY = os.environ["GOOGLE_MAPS_API_KEY"]
+GCAL_ICAL_URL = os.environ["GCAL_ICAL_URL"]
 NTFY_TOPIC = "traffic-information-appy"
-ORIGIN = "福岡県北九州市小倉南区北方２丁目１１−3"
-DESTINATION = "福岡県北九州市八幡西区中須２丁目７−２３"
+ORIGIN = "ç¦å²¡çåä¹å·å¸å°åååºåæ¹ï¼ä¸ç®ï¼ï¼â3"
+DESTINATION = "ç¦å²¡çåä¹å·å¸å«å¹¡è¥¿åºä¸­é ï¼ä¸ç®ï¼âï¼ï¼"
 DELAY_THRESHOLD_MINUTES = 10
 NOTIFY_WHEN_CLEAR = True
+
+JST = timezone(timedelta(hours=9))
+
+
+def is_holiday_today():
+    """Googleã«ã¬ã³ãã¼ã®iCalãåå¾ãã¦ä»æ¥ã®äºå®ã«ãä¼ã¿ããå«ã¾ãããç¢ºèª"""
+    try:
+        resp = requests.get(GCAL_ICAL_URL, timeout=10)
+        resp.raise_for_status()
+        ical_text = resp.text
+
+        today = date.today().strftime("%Y%m%d")
+        today_dt = datetime.now(JST).strftime("%Y%m%d")
+
+        # iCalã®VEVENTã1ä»¶ãã¤ãã§ãã¯
+        events = ical_text.split("BEGIN:VEVENT")
+        for event in events[1:]:
+            # ä»æ¥ã®æ¥ä»ãå«ã¾ãããç¢ºèª
+            if today in event or today_dt in event:
+                # SUMMARYã«ãä¼ã¿ããå«ã¾ãããç¢ºèª
+                for line in event.splitlines():
+                    if line.startswith("SUMMARY") and "ä¼ã¿" in line:
+                        print(f"ä¼ã¿ã®äºå®ãæ¤åº: {line}")
+                        return True
+        return False
+    except Exception as e:
+        print(f"ã«ã¬ã³ãã¼åå¾ã¨ã©ã¼: {e}")
+        return False
 
 
 def get_travel_time():
@@ -26,7 +55,7 @@ def get_travel_time():
     response = requests.get(url, params=params)
     data = response.json()
     if data["status"] != "OK":
-        raise Exception(f"APIエラー: {data['status']}")
+        raise Exception(f"APIã¨ã©ã¼: {data['status']}")
     leg = data["routes"][0]["legs"][0]
     normal = leg["duration"]["value"]
     traffic = leg.get("duration_in_traffic", {}).get("value", normal)
@@ -52,11 +81,12 @@ def send_ntfy(title, message, priority="high"):
 
 
 def main():
-    now = datetime.now()
-    print(f"[{now.strftime('%Y/%m/%d %H:%M')}] 湋濙チェック開始...")
+    now = datetime.now(JST)
+    print(f"[{now.strftime('%Y/%m/%d %H:%M')}] æ¸æ»ãã§ãã¯éå§...")
 
-    if now.weekday() in (2, 3):
-        print("✅ 本日は通知対象外の曜日（水・木）です。スキップします。")
+    # ã«ã¬ã³ãã¼ã§ãä¼ã¿ãã®äºå®ãããããã§ãã¯
+    if is_holiday_today():
+        print("æ¬æ¥ã¯ä¼ã¿ã®äºå®ãããã¾ããã¹ã­ãããã¾ãã")
         return
 
     try:
@@ -64,34 +94,34 @@ def main():
         delay_min = r["delay_seconds"] // 60
         normal_min = r["normal_seconds"] // 60
         traffic_min = r["traffic_seconds"] // 60
-        print(f"通常: {r['normal_text']}, 現在: {r['traffic_text']}, 遅延: {delay_min}分")
+        print(f"éå¸¸: {r['normal_text']}, ç¾å¨: {r['traffic_text']}, éå»¶: {delay_min}å")
 
         if delay_min >= DELAY_THRESHOLD_MINUTES:
             msg = (
-                f"湋濙発生！\n"
-                f"距離: {r['distance']}\n"
-                f"通常: 絈4{normal_min}分\n"
-                f"現在: 絈4{traffic_min}分\n"
-                f"遅延: 絈4{delay_min}分\n"
-                f"早めの出発をおすすめします！"
+                f"æ¸æ»çºçï¼\n"
+                f"è·é¢: {r['distance']}\n"
+                f"éå¸¸: ç´{normal_min}å\n"
+                f"ç¾å¨: ç´{traffic_min}å\n"
+                f"éå»¶: ç´{delay_min}å\n"
+                f"æ©ãã®åºçºããããããã¾ãï¼"
             )
-            send_ntfy("湋濙情報", msg, priority="high")
-            print("✅ 湋濙あり通知を送信しました")
+            send_ntfy("æ¸æ»æå ±", msg, priority="high")
+            print("æ¸æ»ããéç¥ãéä¿¡ãã¾ãã")
         else:
             if NOTIFY_WHEN_CLEAR:
                 msg = (
-                    f"湋濙なし！スムーズです\n"
-                    f"距離: {r['distance']}\n"
-                    f"所要時間: 絈4{traffic_min}分"
+                    f"æ¸æ»ãªãï¼ã¹ã ã¼ãºã§ã\n"
+                    f"è·é¢: {r['distance']}\n"
+                    f"æè¦æé: ç´{traffic_min}å"
                 )
-                send_ntfy("湋濙情報", msg, priority="low")
-                print("✅ 湋濙なし通知を送信しました")
+                send_ntfy("æ¸æ»æå ±", msg, priority="low")
+                print("æ¸æ»ãªãéç¥ãéä¿¡ãã¾ãã")
             else:
-                print("✅ 湋濙なし。通知は送りません。")
+                print("æ¸æ»ãªããéç¥ã¯éãã¾ããã")
 
     except Exception as e:
-        print(f"エラー: {e}")
-        send_ntfy("湋濙チェックエラー", f"エラーが発生しました:\n{e}", priority="default")
+        print(f"ã¨ã©ã¼: {e}")
+        send_ntfy("æ¸æ»ãã§ãã¯ã¨ã©ã¼", f"ã¨ã©ã¼ãçºçãã¾ãã:\n{e}", priority="default")
 
 
 if __name__ == "__main__":
