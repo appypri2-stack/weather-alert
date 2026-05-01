@@ -11,4 +11,5 @@ jobs:
       - name: check and notify
         env:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GCAL_ICAL_URL: ${{ secrets.GCAL_ICAL_URL }}
         run: python3 check_traffic.py
