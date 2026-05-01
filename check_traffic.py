@@ -24,12 +24,9 @@ def is_holiday_today():
         today = date.today().strftime("%Y%m%d")
         today_dt = datetime.now(JST).strftime("%Y%m%d")
 
-        # iCalのVEVENTを1件ずつチェック
         events = ical_text.split("BEGIN:VEVENT")
         for event in events[1:]:
-            # 今日の日付が含まれるか確認
             if today in event or today_dt in event:
-                # SUMMARYに「休み」が含まれるか確認
                 for line in event.splitlines():
                     if line.startswith("SUMMARY") and "休み" in line:
                         print(f"休みの予定を検出: {line}")
@@ -72,9 +69,10 @@ def get_travel_time():
 def send_ntfy(title, message, priority="high"):
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
     headers = {
-        "Title": title.encode("utf-8"),
+        "Title": title,
         "Priority": priority,
         "Tags": "car,japan",
+        "Content-Type": "text/plain; charset=utf-8",
     }
     r = requests.post(url, data=message.encode("utf-8"), headers=headers)
     return r.status_code == 200
@@ -84,7 +82,6 @@ def main():
     now = datetime.now(JST)
     print(f"[{now.strftime('%Y/%m/%d %H:%M')}] 渋滞チェック開始...")
 
-    # カレンダーで「休み」の予定があるかチェック
     if is_holiday_today():
         print("本日は休みの予定があります。スキップします。")
         return
@@ -92,16 +89,14 @@ def main():
     try:
         r = get_travel_time()
         delay_min = r["delay_seconds"] // 60
-        normal_min = r["normal_seconds"] // 60
-        traffic_min = r["traffic_seconds"] // 60
         print(f"通常: {r['normal_text']}, 現在: {r['traffic_text']}, 遅延: {delay_min}分")
 
         if delay_min >= DELAY_THRESHOLD_MINUTES:
             msg = (
                 f"渋滞発生！\n"
                 f"距離: {r['distance']}\n"
-                f"通常: 約{normal_min}分\n"
-                f"現在: 約{traffic_min}分\n"
+                f"通常: {r['normal_text']}\n"
+                f"現在: {r['traffic_text']}\n"
                 f"遅延: 約{delay_min}分\n"
                 f"早めの出発をおすすめします！"
             )
@@ -112,7 +107,7 @@ def main():
                 msg = (
                     f"渋滞なし！スムーズです\n"
                     f"距離: {r['distance']}\n"
-                    f"所要時間: 約{traffic_min}分"
+                    f"所要時間: {r['traffic_text']}"
                 )
                 send_ntfy("渋滞情報", msg, priority="low")
                 print("渋滞なし通知を送信しました")
