@@ -15,6 +15,7 @@ JST = timezone(timedelta(hours=9))
 
 
 def is_holiday_today():
+    return False  # テスト用: 一時的にスキップ無効化
     """GoogleカレンダーのiCalを取得して今日の予定に「休み」が含まれるか確認"""
     try:
         resp = requests.get(GCAL_ICAL_URL, timeout=10)
